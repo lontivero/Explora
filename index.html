@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Explora</title>
+    <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: #1a1a1a;
+            color: #ffffff;
+            font-family: Arial, sans-serif;
+            min-height: 100vh;
+        }
+
+        header {
+            background-color: #2d2d2d;
+            padding: 1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+
+        .logo {
+            font-size: 1.5rem;
+            font-weight: bold;
+        }
+
+        .search-container {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .search-input {
+            padding: 0.5rem;
+            border: none;
+            border-radius: 4px;
+            background-color: #3d3d3d;
+            color: white;
+            width: 300px;
+        }
+
+        .search-button {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 4px;
+            background-color: #4CAF50;
+            color: white;
+            cursor: pointer;
+        }
+
+        .search-button:hover {
+            background-color: #45a049;
+        }
+
+        .main-content {
+            padding: 1rem;
+            height: calc(100vh - 70px);
+        }
+    </style>
+  </head>
+  <body>
+    <script type="module" src="App.fs.js"></script>
+    <header>
+        <div class="logo">Explora</div>
+        <div class="search-container">
+            <input id="txId" type="text" class="search-input" placeholder="Enter Transaction ID" value="f0a1f254d1f1f62080152713247c897bbc9ca9c3f4215cbb3ba0d55a535eaa5e">
+            <button id="search-button" class="search-button">Search</button>
+        </div>
+    </header>
+    <div id="mynetwork" class="main-content">
+        <!-- Empty div that fills available space -->
+    </div>
+  </body>
+</html>

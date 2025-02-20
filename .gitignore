@@ -1,0 +1,7 @@
+bin/
+obj/
+.idea/
+*_modules/
+*.fs.js
+*.user
+Utils/
