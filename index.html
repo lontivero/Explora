@@ -26,6 +26,7 @@
             justify-content: space-between;
             align-items: center;
             box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            z-index: 100
         }
 
         .logo {
@@ -60,14 +61,88 @@
             background-color: #45a049;
         }
 
-        .main-content {
-            padding: 1rem;
+        .content-wrapper {
+            display: flex;
             height: calc(100vh - 70px);
         }
+
+        .main-content {
+            flex: 1;
+            padding: 1rem;
+        }
+
+       .side-panel {
+            position: fixed;
+            right: 0;
+            width: 350px;
+            height: 100%;
+            padding: 5px;
+            background-color: rgba(45, 45, 45, 0.9); 
+            box-shadow: -2px 0 5px rgba(0,0,0,0.2);
+            overflow-y: auto;
+            z-index: 1;
+            transition: transform 0.3s ease;
+            margin: 5px;
+        }
+
+        .side-panel.hidden {
+            visibility: hidden;
+        }
+        .side-panel .tx-details {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.70rem;
+            margin-bottom: 1rem;
+        }
+
+        .side-panel .tx-details th,
+        .side-panel .tx-details td {
+            padding: 4px 8px;
+            text-align: left;
+        }
+
+        .side-panel .tx-details th {
+            font-weight: 600;
+            background-color: rgba(0, 0, 0, 0.2);
+            font-size: 0.6rem;
+        }
+
+        .side-panel .tx-details thead th[colspan="2"] {
+            background-color: rgba(0, 0, 0, 0.3);
+            padding: 8px;
+            font-size: 0.75rem;
+        }
+
+        .side-panel .tx-details tr:hover {
+            background-color: rgba(255, 255, 255, 0.05);
+        }
+
+        .side-panel .tx-details .address {
+            max-width: 180px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            font-family: monospace;
+            white-space: nowrap;
+        }
+
+        .side-panel .tx-details .amount {
+            text-align: right;
+            font-family: monospace;
+            white-space: nowrap;
+        }
+
+        /* Optional: different colors for inputs/outputs */
+        .side-panel .tx-details thead:first-of-type th[colspan="2"] {
+            color: #ff9999; /* Light red for inputs */
+        }
+
+        .side-panel .tx-details thead:last-of-type th[colspan="2"] {
+            color: #99ff99; /* Light green for outputs */
+        }
     </style>
+    <script type="module" src="App.fs.js"></script>
   </head>
   <body>
-    <script type="module" src="App.fs.js"></script>
     <header>
         <div class="logo">Explora</div>
         <div class="search-container">
@@ -75,8 +150,14 @@
             <button id="search-button" class="search-button">Search</button>
         </div>
     </header>
-    <div id="mynetwork" class="main-content">
-        <!-- Empty div that fills available space -->
+    <div class="content-wrapper">
+        <div id="mynetwork" class="main-content">
+            <!-- Network visualization area -->
+        </div>
+        <div id="tx-details" class="side-panel hidden">
+            <p>sisisis </p>
+            <!-- Content for the side panel -->
+        </div>
     </div>
   </body>
 </html>

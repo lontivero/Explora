@@ -9,16 +9,6 @@ open Microsoft.FSharp.Core
 open Vis
 open Fable.Core.JsInterop
 
-type Graph = {
-    network : Network
-    data : Data
-    scriptPubKeys:  ResizeArray<string * IdType>
-}
-
-//[<Import("*", "vis")>]
-[<Global>]
-let vis : IExports = jsNative
-
 [<Literal>]
 let pkhColor = "#fea1c9"
 [<Literal>]
@@ -35,6 +25,19 @@ let shColor = "#fefe5e"
 let multiColor = "#5d87fd"
 [<Literal>]
 let unknown = "#ff0000"
+
+type Graph = {
+    network: Network
+    data: Data
+    txs: ResizeArray<Transaction>
+    scriptPubKeys:  ResizeArray<string * IdType>
+}
+
+//[<Import("*", "vis")>]
+[<Global>]
+let vis : IExports = jsNative
+
+let formatAmount value = $"{value} BTC"
 
 let addNode (node: Node) (data : Data) =
     if Option.isSome node.id then
@@ -75,7 +78,6 @@ let createEdge from ``to`` (value: float option) (arrows: string option) (script
        | "nulldata" ->   U2.Case2 (ResizeArray([10.0; 10.0; 10; 10]))
        | _ -> U2.Case1 false
 
-    //      scripthash, multisig, nulldata, witness_v0_scripthash, witness_v0_keyhash, witness_v1_taproot, witness_unknown 
    let color =
        match scriptType with
        | "pubkeyhash" -> pkhColor
@@ -91,12 +93,12 @@ let createEdge from ``to`` (value: float option) (arrows: string option) (script
    jsOptions<Edge>(fun e ->
        e.from <- from
        e.``to`` <- ``to``
+       e.title <- Some (formatAmount value)
        e.value <- value
        e.arrows <- arrows |> Option.map U2.Case1
        e.dashes <- Some dashes
        e.color <- Some !^color)
 
-let formatAmount value = $"{value} BTC"
 
 let createTitle (item : U3<Transaction, Input, Output>) =
     let row (label, value) = $"<tr><td>{label}:</td><td>{value}</td></tr>"
@@ -105,10 +107,12 @@ let createTitle (item : U3<Transaction, Input, Output>) =
         | U3.Case1 tx -> [
             "Hash", tx.txid
             "Version", string tx.version
+            "Value", tx.vin |> Seq.sumBy (_.prevOut.value) |> formatAmount
             "Fee", formatAmount tx.fee
             "Vsize", string tx.vsize
             "Locktime", string tx.locktime
             "BlockHash", tx.blockhash
+            "BlockTime", tx.blocktime.ToString()
             "Inputs", string tx.vin.Length
             "Outputs", string tx.vout.Length ]
         | U3.Case2 input -> [
@@ -146,25 +150,44 @@ let createTxNode (tx: Transaction) =
    
 // Network visualization
 let addTransactionToGraph (tx: Transaction) (graph: Graph) =
+    graph.txs.Add(tx)
+    
     // Add central transaction node
     let node = createTxNode tx
     addNode node graph.data
     
     // Add inputs
     for input in tx.vin do
-        let node = createInputNode input
-        addNode node graph.data
-        let edge = createEdge node.id (Some !^tx.txid) (Some input.prevOut.value) (Some "to") input.prevOut.scriptPubKey.scriptType
-        addEdge edge graph.data
+        graph.data.nodes.get(U2.Case1 input.txid)
+        |> Option.iter (fun prevTxNode ->
+            let edge = createEdge prevTxNode.id (Some !^tx.txid) (Some input.prevOut.value) (Some "to") input.prevOut.scriptPubKey.scriptType
+            addEdge edge graph.data)
+    
+    for vout, output in Array.indexed tx.vout do
+        graph.txs
+        |> Seq.collect(fun tx -> tx.vin |> Array.map (fun i -> i, tx.txid))
+        |> Seq.tryFind (fun (input, txid) -> input.txid = tx.txid && input.vout = vout )
+        |> Option.map(snd)
+        |> Option.bind (fun spenderTxId -> graph.data.nodes.get(U2.Case1 spenderTxId))
+        |> Option.iter(fun nextTxNode ->
+            let edge = createEdge (Some !^tx.txid) nextTxNode.id (Some output.value) (Some "to") output.scriptPubKey.scriptType
+            addEdge edge graph.data)
 
-    // Add outputs
-    for index, output in Array.indexed tx.vout do 
-        let node = createOutputNode output tx.txid index
-        addNode node graph.data
-        let edge = createEdge (Some !^tx.txid) node.id (Some output.value) (Some "to") output.scriptPubKey.scriptType
-        addEdge edge graph.data
-        
-        output.scriptPubKey.address |> Option.iter( fun addr -> addAddress addr node.id.Value graph)
+//    // Add inputs
+//    for input in tx.vin do
+//        let node = createInputNode input
+//        addNode node graph.data
+//        let edge = createEdge node.id (Some !^tx.txid) (Some input.prevOut.value) (Some "to") input.prevOut.scriptPubKey.scriptType
+//        addEdge edge graph.data
+//
+//    // Add outputs
+//    for index, output in Array.indexed tx.vout do 
+//        let node = createOutputNode output tx.txid index
+//        addNode node graph.data
+//        let edge = createEdge (Some !^tx.txid) node.id (Some output.value) (Some "to") output.scriptPubKey.scriptType
+//        addEdge edge graph.data
+//        
+//        output.scriptPubKey.address |> Option.iter( fun addr -> addAddress addr node.id.Value graph)
 
 let createGraph (container : HTMLElement) =
     let nodes = vis.DataSet.Create<Node>()
@@ -208,4 +231,5 @@ let createGraph (container : HTMLElement) =
         network = network
         data = networkData
         scriptPubKeys = ResizeArray<string * IdType>()
+        txs = ResizeArray<Transaction>()
     }
