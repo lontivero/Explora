@@ -1,6 +1,6 @@
 module Explora.MempoolSpace
 
-open Microsoft.FSharp.Core
+open Fable.Core
 open Thoth.Fetch
 open Thoth.Json
 
@@ -51,5 +51,15 @@ let SpendingStatusDecoder =
     
 let getSpenderTransaction (txId: string) (index: int) =
     promise {
-        return! Fetch.get($"https://mempool.space/api/tx/{txId}/outspend/{index}", decoder = SpendingStatusDecoder)
+        let endpoints =
+            [|
+            //"https://mempool.cakewallet.com"
+            //"https://mempool.lyberry.com"
+            "https://mempool.space"
+            |]
+        
+        let rnd = JS.Math.floor(JS.Math.random() * 100.0) 
+        let endpoint = endpoints[int rnd % endpoints.Length]
+        let! result = Fetch.get($"{endpoint}/api/tx/{txId}/outspend/{index}", decoder = SpendingStatusDecoder)
+        return result
     }

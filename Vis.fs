@@ -1469,7 +1469,7 @@ type [<AllowNullLiteral>] EdgeOptions =
     abstract selfReference: {| size: float option; angle: float option; renderBehindTheNode: bool option |} option with get, set
     abstract shadow: U2<bool, OptionsShadow> option with get, set
     abstract smooth: U2<bool, {| enabled: bool; ``type``: string; forceDirection: U2<string, bool> option; roundness: float |}> option with get, set
-    abstract title: string option with get, set
+    abstract title: U2<string, HTMLElement> option with get, set
     abstract value: float option with get, set
     abstract width: float option with get, set
     abstract widthConstraint: U3<float, bool, {| maximum: float option |}> option with get, set

@@ -6,6 +6,7 @@ open Browser.Types
 open Explora.Types
 open Fable.Core
 open Microsoft.FSharp.Core
+open Thoth.Json
 open Vis
 open Fable.Core.JsInterop
 
@@ -29,8 +30,6 @@ let unknown = "#ff0000"
 type Graph = {
     network: Network
     data: Data
-    txs: ResizeArray<Transaction>
-    scriptPubKeys:  ResizeArray<string * IdType>
 }
 
 //[<Import("*", "vis")>]
@@ -39,155 +38,112 @@ let vis : IExports = jsNative
 
 let formatAmount value = $"{value} BTC"
 
-let addNode (node: Node) (data : Data) =
-    if Option.isSome node.id then
-        let id = Option.get node.id
-        if Option.isNone (data.nodes.get(id)) then
-            data.nodes.add(!^node) |> ignore
-
-let addEdge (edge: Edge) (data : Data) =
-    data.edges.add(!^edge) |> ignore
-
-let addAddress address txoNodeId graph =
-    graph.scriptPubKeys.Add (address, txoNodeId)
-    
-let createNode id title metadata =
-    let getShapeByLocktime locktime =
-        match locktime with
-        | 0 -> "dot"
-        | t when t < 500_000_000 -> "square"
-        | _ -> "hexagon"
-
-    let shape =
-        match metadata with
-        | U3.Case3 meta -> getShapeByLocktime meta.tx.locktime
-        | _ -> "dot"
-
-    jsOptions<GraphNode>(fun n -> 
-       n.id <- Some id
-       n.title <- Some title
-       n.metadata <- metadata
-       n.shape <- Some shape)
-  
-let createEdge from ``to`` (value: float option) (arrows: string option) (scriptType: string) =
-   let mutable dashes =
-       match scriptType with
-       | "multisig" ->  U2.Case2 (ResizeArray([15.0; 15.0; 5.0]))
-       | "scripthash" ->   U2.Case2 (ResizeArray([40.0; 5.0; 5; 5]))
-       | "witness_v0_scripthash" ->   U2.Case2 (ResizeArray([30.0; 15.0; 5.0; 15.0]))
-       | "nulldata" ->   U2.Case2 (ResizeArray([10.0; 10.0; 10; 10]))
-       | _ -> U2.Case1 false
-
-   let color =
-       match scriptType with
-       | "pubkeyhash" -> pkhColor
-       | "witness_v0_keyhash" -> wkhColor
-       | "witness_v1_taproot" -> trColor
-       | "nulldata" -> nullDataColor
-       | "witness_unknown" -> unknownWitnessColor
-       | "witness_v0_scripthash"
-       | "scripthash" -> shColor 
-       | "multisig" -> multiColor
-       | _ -> unknown
-       
-   jsOptions<Edge>(fun e ->
-       e.from <- from
-       e.``to`` <- ``to``
-       e.title <- Some (formatAmount value)
-       e.value <- value
-       e.arrows <- arrows |> Option.map U2.Case1
-       e.dashes <- Some dashes
-       e.color <- Some !^color)
-
-
-let createTitle (item : U3<Transaction, Input, Output>) =
+let createTitle (item : U2<TxMetadata, OutputMetadata>) =
     let row (label, value) = $"<tr><td>{label}:</td><td>{value}</td></tr>"
     let fields =
         match item with
-        | U3.Case1 tx -> [
-            "Hash", tx.txid
-            "Version", string tx.version
-            "Value", tx.vin |> Seq.sumBy (_.prevOut.value) |> formatAmount
-            "Fee", formatAmount tx.fee
-            "Vsize", string tx.vsize
-            "Locktime", string tx.locktime
-            "BlockHash", tx.blockhash
-            "BlockTime", tx.blocktime.ToString()
-            "Inputs", string tx.vin.Length
-            "Outputs", string tx.vout.Length ]
-        | U3.Case2 input -> [
-            "PrevTx", input.txid
-            "PrevIx", string input.vout
-            "Address", input.prevOut.scriptPubKey.address |> Option.defaultValue "--"
-            "Amount", formatAmount input.prevOut.value
-            "ScriptType", input.prevOut.scriptPubKey.scriptType ]
-        | U3.Case3 output ->[
-            "Address", output.scriptPubKey.address |> Option.defaultValue "--"
-            "Amount", formatAmount output.value
-            "ScriptType", output.scriptPubKey.scriptType ]
+        | U2.Case1 meta -> [
+            "Hash", meta.tx.txid
+            "Version", string meta.tx.version
+            "Value", meta.tx.vin |> Seq.sumBy (_.prevOut.value) |> formatAmount
+            "Fee", formatAmount meta.tx.fee
+            "Vsize", string meta.tx.vsize
+            "Locktime", string meta.tx.locktime
+            "BlockHash", meta.tx.blockhash
+            "BlockTime", meta.tx.blocktime.ToString()
+            "Inputs", string meta.tx.vin.Length
+            "Outputs", string meta.tx.vout.Length ]
+        | U2.Case2 meta ->[
+            "Address", meta.output.scriptPubKey.address |> Option.defaultValue "--"
+            "Amount", formatAmount meta.output.value
+            "ScriptType", meta.output.scriptPubKey.scriptType 
+            "PrvTx", meta.txid
+            "PrevIx", string meta.index ]
     let rows = fields |> List.map row |> String.concat ""
     let div = document.createElement("div")
     div.innerHTML <- $"<table><tbody>{rows}</tbody></table>"
     div
-    
-let createInputNode (input: Input) =
-    let nodeId = $"{input.txid}-%d{input.vout}"
-    let node = createNode !^nodeId !^(createTitle !^input) !^{ input = input }
-    node
-    
-let createOutputNode (output: Output) txid index =
-    let nodeId = $"{txid}-%d{index}"
-    let metadata = {
-        txid = txid
-        index = index
-        output = output
-    }
-    let node = createNode !^nodeId !^(createTitle !^output) !^metadata
-    node
-    
-let createTxNode (tx: Transaction) =
-    createNode !^tx.txid !^(createTitle !^tx) !^{ tx = tx }
    
-// Network visualization
-let addTransactionToGraph (tx: Transaction) (graph: Graph) =
-    graph.txs.Add(tx)
+let createTxNode (tx: Transaction) =
+    {
+        Id = tx.txid
+        Title = createTitle !^{ tx = tx }
+        Metadata = !^{ tx = tx}
+        Selected = false
+        Marked = false
+        Kind = NodeModelKind.Tx
+    }
     
-    // Add central transaction node
+let createTxoNode (txo: OutputMetadata) =
+    {
+       Id = $"{txo.txid}-{txo.index}"
+       Title = createTitle !^txo
+       Selected = false
+       Marked = false
+       Metadata = !^txo
+       Kind = NodeModelKind.Txo
+    }
+   
+let createEdge (from: NodeId) (_to: NodeId) (txo: OutputMetadata)=
+    {
+       Id = $"{from}->{_to}"
+       From = from
+       To = _to
+       Value = txo.output.value
+       Title = createTitle !^txo
+       Marked = false
+       Selected = false
+       Output = txo.output
+    }
+    
+let addTransactionToGraph (tx: Transaction) (graph: GraphModel) =
     let node = createTxNode tx
-    addNode node graph.data
     
-    // Add inputs
-    for input in tx.vin do
-        graph.data.nodes.get(U2.Case1 input.txid)
-        |> Option.iter (fun prevTxNode ->
-            let edge = createEdge prevTxNode.id (Some !^tx.txid) (Some input.prevOut.value) (Some "to") input.prevOut.scriptPubKey.scriptType
-            addEdge edge graph.data)
+    let edgesFromPreviousNodes =
+        tx.vin
+        |> Array.map (fun input -> 
+            graph.Nodes
+            |> NodeModel.get input.txid
+            |> Option.map (fun prevTxNode ->
+                createEdge prevTxNode.Id tx.txid {output = input.prevOut; txid = input.txid; index = input.vout }))
+       |> Array.choose id
+       |> List.ofArray
+       
+    let edgesToNextNodes =
+        tx.vout
+        |> List.ofArray
+        |> List.mapi (fun i output ->
+            graph.Nodes
+            |> NodeModel.getSpenderNode tx.txid i
+            |> Option.map(fun nextTxNode ->
+                createEdge tx.txid nextTxNode.Id {output = output; txid = tx.txid; index = i}))
+        |> List.choose id
+       
+    { graph with
+        Nodes = node :: graph.Nodes
+        Edges = List.concat [graph.Edges; edgesFromPreviousNodes; edgesToNextNodes]
+    }
+   
+let addTxosToGraph (tx: Transaction) (graph: GraphModel) =
+    let createdTxo = tx.vout |> Array.mapi (fun i x -> { txid = tx.txid; index = i; output = x })
+    let txos =
+        createdTxo
+        |> Array.map createTxoNode
+        |> List.ofArray
+       
+    let edgesFromTx =
+        createdTxo
+        |> Array.map (fun txo ->
+            graph.Nodes
+            |> NodeModel.get txo.txid
+            |> Option.map(fun txNode -> createEdge txNode.Id $"{txo.txid}-{txo.index}" txo))
+        |> Array.choose id
+        |> List.ofArray
     
-    for vout, output in Array.indexed tx.vout do
-        graph.txs
-        |> Seq.collect(fun tx -> tx.vin |> Array.map (fun i -> i, tx.txid))
-        |> Seq.tryFind (fun (input, txid) -> input.txid = tx.txid && input.vout = vout )
-        |> Option.map(snd)
-        |> Option.bind (fun spenderTxId -> graph.data.nodes.get(U2.Case1 spenderTxId))
-        |> Option.iter(fun nextTxNode ->
-            let edge = createEdge (Some !^tx.txid) nextTxNode.id (Some output.value) (Some "to") output.scriptPubKey.scriptType
-            addEdge edge graph.data)
-
-//    // Add inputs
-//    for input in tx.vin do
-//        let node = createInputNode input
-//        addNode node graph.data
-//        let edge = createEdge node.id (Some !^tx.txid) (Some input.prevOut.value) (Some "to") input.prevOut.scriptPubKey.scriptType
-//        addEdge edge graph.data
-//
-//    // Add outputs
-//    for index, output in Array.indexed tx.vout do 
-//        let node = createOutputNode output tx.txid index
-//        addNode node graph.data
-//        let edge = createEdge (Some !^tx.txid) node.id (Some output.value) (Some "to") output.scriptPubKey.scriptType
-//        addEdge edge graph.data
-//        
-//        output.scriptPubKey.address |> Option.iter( fun addr -> addAddress addr node.id.Value graph)
+    { graph with
+        Nodes = graph.Nodes @ txos
+        Edges = List.concat [graph.Edges; edgesFromTx]
+    }
 
 let createGraph (container : HTMLElement) =
     let nodes = vis.DataSet.Create<Node>()
@@ -230,6 +186,126 @@ let createGraph (container : HTMLElement) =
     {
         network = network
         data = networkData
-        scriptPubKeys = ResizeArray<string * IdType>()
-        txs = ResizeArray<Transaction>()
+    }
+
+// ---------------------------------------------------
+let updateNode (graph: Graph) (nodeModel: NodeModel) =
+    let node =
+        graph.data.nodes.get(U2.Case1 nodeModel.Id)
+        |> Option.defaultWith (fun ()-> jsOptions<Node>(fun o -> o.id <- Some !^nodeModel.Id ))
+    
+    let getShapeByLocktime locktime =
+        match locktime with
+        | 0 -> "dot"
+        | t when t < 500_000_000 -> "square"
+        | _ -> "hexagon"
+
+    let shape =
+        match nodeModel.Metadata with
+        | U2.Case1 meta -> "diamond"
+        | U2.Case2 meta -> getShapeByLocktime meta.tx.locktime
+        | _ -> "dot"
+
+    let color =
+        match nodeModel.Marked, nodeModel.Selected with
+        | true, _ -> Some !^"#ff5722"
+        | _, true -> Some !^"#10cfb5"
+        | _, false -> Some !^"#1984fc"
+        
+    let value =
+        match nodeModel.Metadata with
+        | U2.Case1 outputMetadata -> outputMetadata.output.value
+        | U2.Case2 txMetadata -> txMetadata.tx.vin |> Array.sumBy (_.prevOut.value)
+        
+    node.title <- Some !^nodeModel.Title
+    node.shape <- Some shape
+    node.value <- Some value
+    node.color <- color 
+    node
+    
+let updateEdge (graph: Graph) (edgeModel: EdgeModel) =
+    let edge =
+        graph.data.edges.get(U2.Case1 edgeModel.Id)
+        |> Option.defaultWith (fun ()-> jsOptions<Edge>(fun o -> o.id <- Some !^edgeModel.Id ))
+    
+    let mutable dashes =
+       match edgeModel.Output.scriptPubKey.scriptType with
+       | "multisig" ->  U2.Case2 (ResizeArray([15.0; 15.0; 5.0]))
+       | "scripthash" ->   U2.Case2 (ResizeArray([40.0; 5.0; 5; 5]))
+       | "witness_v0_scripthash" ->   U2.Case2 (ResizeArray([30.0; 15.0; 5.0; 15.0]))
+       | "nulldata" ->   U2.Case2 (ResizeArray([10.0; 10.0; 10; 10]))
+       | _ -> U2.Case1 false
+
+    let color =
+       match edgeModel.Output.scriptPubKey.scriptType with
+       | "pubkeyhash" -> pkhColor
+       | "witness_v0_keyhash" -> wkhColor
+       | "witness_v1_taproot" -> trColor
+       | "nulldata" -> nullDataColor
+       | "witness_unknown" -> unknownWitnessColor
+       | "witness_v0_scripthash"
+       | "scripthash" -> shColor 
+       | "multisig" -> multiColor
+       | _ -> unknown
+       
+    edge.from <- Some !^edgeModel.From
+    edge.``to`` <- Some !^edgeModel.To
+    edge.title <- Some !^edgeModel.Title
+    edge.value <- Some edgeModel.Output.value
+    edge.arrows <- Some !^"to"
+    edge.dashes <- Some dashes
+    edge.color <- Some !^color
+    edge
+
+let getUnexistentNodes graph graphModel =
+    let nodeIds = graphModel.Nodes |> List.map (fun x -> !^x.Id)
+    let allNodeIds = graph.data.nodes.getIds()
+    allNodeIds |> Seq.except nodeIds
+    
+let getUnexistentEdges graph graphModel =
+    let edgesIds = graphModel.Edges |> List.map (fun x -> !^x.Id)
+    let allEdgeIds = graph.data.edges.getIds()
+    allEdgeIds |> Seq.except edgesIds
+    
+let update graph graphModel =
+    let updatedNodes = ResizeArray ( graphModel.Nodes |> List.map(updateNode graph)  )
+    let nodesToRemove = ResizeArray (getUnexistentNodes graph graphModel)
+    let updatedEdges = ResizeArray ( graphModel.Edges |> List.map(updateEdge graph)  )
+    let edgesToRemove = ResizeArray (getUnexistentEdges graph graphModel)
+    graph.data.nodes.remove (!^nodesToRemove) |> ignore
+    graph.data.edges.remove (!^edgesToRemove) |> ignore
+    graph.data.nodes.update (!^updatedNodes) |> ignore
+    graph.data.edges.update (!^updatedEdges) |> ignore
+
+let deselectAll graphModel =
+    { graphModel with
+        Nodes = graphModel.Nodes |> List.map (fun n -> {n with Selected = false})
+        Edges = graphModel.Edges |> List.map (fun n -> {n with Selected = false})
+    }
+    
+let selectedNode (node: NodeModel) graphModel =
+    let graphModel = deselectAll graphModel  
+    let nodeToUpdate = {node with Selected = true}
+    let untouched  = graphModel.Nodes |> List.filter (fun n -> n.Id <> nodeToUpdate.Id)
+    { graphModel with
+        Nodes = nodeToUpdate :: untouched
+    }
+    
+let selectedEdge (edge: EdgeModel) graphModel =
+    let graphModel = deselectAll graphModel  
+    let edgeToUpdate = {edge with Selected = true}
+    let untouched  = graphModel.Edges |> List.filter (fun n -> n.Id <> edgeToUpdate.Id)
+    { graphModel with
+        Edges = edgeToUpdate :: untouched
+    }
+    
+let toggleMarkSelected graphModel =
+    let nodesToUpdate, restNodes = graphModel.Nodes |> List.partition _.Selected
+    let updatedNodes = nodesToUpdate |> List.map (fun n -> { n with Marked = not n.Marked }) 
+    let edgesToUpdate, restEdges = graphModel.Edges |> List.partition _.Selected
+    let updatedEdges = edgesToUpdate |> List.map (fun e -> { e with Marked = not e.Marked }) 
+    
+    { graphModel with
+        Nodes = updatedNodes @ restNodes
+        Edges = updatedEdges @ restEdges
     }
