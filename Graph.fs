@@ -84,9 +84,9 @@ let createTxoNode (txo: OutputMetadata) =
        Kind = NodeModelKind.Txo
     }
    
-let createEdge (from: NodeId) (_to: NodeId) (txo: OutputMetadata)=
+let createEdge (id: string) (from: NodeId) (_to: NodeId) (txo: OutputMetadata)=
     {
-       Id = $"{from}->{_to}"
+       Id = id 
        From = from
        To = _to
        Value = txo.output.value
@@ -96,16 +96,45 @@ let createEdge (from: NodeId) (_to: NodeId) (txo: OutputMetadata)=
        Output = txo.output
     }
     
+let deselectAll graphModel =
+    { graphModel with
+        Nodes = graphModel.Nodes |> List.map (fun n -> {n with Selected = false})
+        Edges = graphModel.Edges |> List.map (fun n -> {n with Selected = false})
+    }
+    
+let selectNode (node: NodeModel) graphModel =
+    let graphModel = deselectAll graphModel  
+    let nodeToUpdate = {node with Selected = true}
+    let untouchedNodes  = graphModel.Nodes |> List.filter (fun n -> n.Id <> nodeToUpdate.Id)
+    let edgesToUpdate = graphModel |> GraphModel.getEdgesConnectedTo nodeToUpdate.Id |> List.map (fun edge -> {edge with Selected = true })
+    let untouchedEdges = graphModel.Edges |> List.filter (fun e -> List.exists (fun e2 -> e2.Id = e.Id) edgesToUpdate |> not)
+    { graphModel with
+        Nodes = nodeToUpdate :: untouchedNodes
+        Edges = edgesToUpdate @ untouchedEdges
+    }
+    
+// unused
+let selectEdge (edge: EdgeModel) graphModel =
+    let graphModel = deselectAll graphModel  
+    let edgeToUpdate = {edge with Selected = true}
+    let untouched  = graphModel.Edges |> List.filter (fun n -> n.Id <> edgeToUpdate.Id)
+    { graphModel with
+        Edges = edgeToUpdate :: untouched
+    }
+    
 let addTransactionToGraph (tx: Transaction) (graph: GraphModel) =
     let node = createTxNode tx
     
     let edgesFromPreviousNodes =
         tx.vin
         |> Array.map (fun input -> 
-            graph.Nodes
-            |> NodeModel.get input.txid
+            graph
+            |> GraphModel.getNode input.txid
             |> Option.map (fun prevTxNode ->
-                createEdge prevTxNode.Id tx.txid {output = input.prevOut; txid = input.txid; index = input.vout }))
+                let from = prevTxNode.Id
+                let _to  = tx.txid
+                let id = $"{from}-{_to}-{input.vout}"
+                createEdge id from _to {output = input.prevOut; txid = input.txid; index = input.vout }))
        |> Array.choose id
        |> List.ofArray
        
@@ -113,16 +142,22 @@ let addTransactionToGraph (tx: Transaction) (graph: GraphModel) =
         tx.vout
         |> List.ofArray
         |> List.mapi (fun i output ->
-            graph.Nodes
-            |> NodeModel.getSpenderNode tx.txid i
+            graph
+            |> GraphModel.getSpenderNode tx.txid i
             |> Option.map(fun nextTxNode ->
-                createEdge tx.txid nextTxNode.Id {output = output; txid = tx.txid; index = i}))
+                let from = tx.txid
+                let _to  = nextTxNode.Id
+                let id = $"{from}-{i}-{_to}"
+                createEdge id from _to {output = output; txid = tx.txid; index = i}))
         |> List.choose id
        
-    { graph with
-        Nodes = node :: graph.Nodes
-        Edges = List.concat [graph.Edges; edgesFromPreviousNodes; edgesToNextNodes]
-    }
+    let newGraph  =
+        { graph with
+            Nodes = node :: graph.Nodes
+            Edges = List.concat [graph.Edges; edgesFromPreviousNodes; edgesToNextNodes]
+        }
+    
+    selectNode node newGraph
    
 let addTxosToGraph (tx: Transaction) (graph: GraphModel) =
     let createdTxo = tx.vout |> Array.mapi (fun i x -> { txid = tx.txid; index = i; output = x })
@@ -134,9 +169,13 @@ let addTxosToGraph (tx: Transaction) (graph: GraphModel) =
     let edgesFromTx =
         createdTxo
         |> Array.map (fun txo ->
-            graph.Nodes
-            |> NodeModel.get txo.txid
-            |> Option.map(fun txNode -> createEdge txNode.Id $"{txo.txid}-{txo.index}" txo))
+            graph
+            |> GraphModel.getNode txo.txid
+            |> Option.map(fun txNode ->
+                let from = txNode.Id
+                let _to  = $"{txo.txid}-{txo.index}"
+                let id = $"{from}-{_to}"
+                createEdge id from _to txo))
         |> Array.choose id
         |> List.ofArray
     
@@ -204,7 +243,6 @@ let updateNode (graph: Graph) (nodeModel: NodeModel) =
         match nodeModel.Metadata with
         | U2.Case1 meta -> "diamond"
         | U2.Case2 meta -> getShapeByLocktime meta.tx.locktime
-        | _ -> "dot"
 
     let color =
         match nodeModel.Marked, nodeModel.Selected with
@@ -223,7 +261,7 @@ let updateNode (graph: Graph) (nodeModel: NodeModel) =
     node.color <- color 
     node
     
-let updateEdge (graph: Graph) (edgeModel: EdgeModel) =
+let updateEdge (graph: Graph) (anySelected: bool) (edgeModel: EdgeModel) =
     let edge =
         graph.data.edges.get(U2.Case1 edgeModel.Id)
         |> Option.defaultWith (fun ()-> jsOptions<Edge>(fun o -> o.id <- Some !^edgeModel.Id ))
@@ -237,17 +275,18 @@ let updateEdge (graph: Graph) (edgeModel: EdgeModel) =
        | _ -> U2.Case1 false
 
     let color =
-       match edgeModel.Output.scriptPubKey.scriptType with
-       | "pubkeyhash" -> pkhColor
-       | "witness_v0_keyhash" -> wkhColor
-       | "witness_v1_taproot" -> trColor
-       | "nulldata" -> nullDataColor
-       | "witness_unknown" -> unknownWitnessColor
-       | "witness_v0_scripthash"
-       | "scripthash" -> shColor 
-       | "multisig" -> multiColor
-       | _ -> unknown
-       
+       match (edgeModel.Selected || not anySelected), edgeModel.Output.scriptPubKey.scriptType with
+       | true, "pubkeyhash" -> pkhColor
+       | true, "witness_v0_keyhash" -> wkhColor
+       | true, "witness_v1_taproot" -> trColor
+       | true, "nulldata" -> nullDataColor
+       | true, "witness_unknown" -> unknownWitnessColor
+       | true, "witness_v0_scripthash"
+       | true, "scripthash" -> shColor 
+       | true, "multisig" -> multiColor
+       | true, _ -> unknown
+       | false, _ -> "#333333"
+    
     edge.from <- Some !^edgeModel.From
     edge.``to`` <- Some !^edgeModel.To
     edge.title <- Some !^edgeModel.Title
@@ -270,35 +309,14 @@ let getUnexistentEdges graph graphModel =
 let update graph graphModel =
     let updatedNodes = ResizeArray ( graphModel.Nodes |> List.map(updateNode graph)  )
     let nodesToRemove = ResizeArray (getUnexistentNodes graph graphModel)
-    let updatedEdges = ResizeArray ( graphModel.Edges |> List.map(updateEdge graph)  )
+    let isAnySelected = graphModel.Nodes |> List.exists (_.Selected)
+    let updatedEdges = ResizeArray ( graphModel.Edges |> List.map(updateEdge graph isAnySelected)  )
     let edgesToRemove = ResizeArray (getUnexistentEdges graph graphModel)
     graph.data.nodes.remove (!^nodesToRemove) |> ignore
     graph.data.edges.remove (!^edgesToRemove) |> ignore
     graph.data.nodes.update (!^updatedNodes) |> ignore
     graph.data.edges.update (!^updatedEdges) |> ignore
 
-let deselectAll graphModel =
-    { graphModel with
-        Nodes = graphModel.Nodes |> List.map (fun n -> {n with Selected = false})
-        Edges = graphModel.Edges |> List.map (fun n -> {n with Selected = false})
-    }
-    
-let selectedNode (node: NodeModel) graphModel =
-    let graphModel = deselectAll graphModel  
-    let nodeToUpdate = {node with Selected = true}
-    let untouched  = graphModel.Nodes |> List.filter (fun n -> n.Id <> nodeToUpdate.Id)
-    { graphModel with
-        Nodes = nodeToUpdate :: untouched
-    }
-    
-let selectedEdge (edge: EdgeModel) graphModel =
-    let graphModel = deselectAll graphModel  
-    let edgeToUpdate = {edge with Selected = true}
-    let untouched  = graphModel.Edges |> List.filter (fun n -> n.Id <> edgeToUpdate.Id)
-    { graphModel with
-        Edges = edgeToUpdate :: untouched
-    }
-    
 let toggleMarkSelected graphModel =
     let nodesToUpdate, restNodes = graphModel.Nodes |> List.partition _.Selected
     let updatedNodes = nodesToUpdate |> List.map (fun n -> { n with Marked = not n.Marked }) 

@@ -193,8 +193,8 @@ let init() =
         )
     graph.network.on(NetworkEvents.SelectNode, fun ps ->
         let txid = ps?nodes |> Array.head
-        getCurrentGraphModel().Nodes
-        |> NodeModel.get txid
+        getCurrentGraphModel()
+        |> GraphModel.getNode txid
         |> Option.iter(fun node ->
             match node.Metadata with
             | U2.Case2 txMetadata -> 
@@ -202,13 +202,14 @@ let init() =
                 if txDetails.classList.contains("hidden") then
                     txDetails.classList.toggle("hidden") |> ignore
                 setupRowClickHandlers graph
-                updateGraphModel (Ok (selectedNode node (getCurrentGraphModel())))
+                updateGraphModel (Ok (selectNode node (getCurrentGraphModel())))
             | _ -> ()) 
         )
     graph.network.on(NetworkEvents.DeselectNode, fun ps ->
         if txDetails.classList.contains("hidden") = false then
             txDetails.classList.toggle("hidden") |> ignore
-        )
+        updateGraphModel (Ok (deselectAll (getCurrentGraphModel())))
+    )
     graph.network.on(NetworkEvents.DoubleClick,
        function
        | Some o ->
@@ -216,8 +217,8 @@ let init() =
            if ps.nodes.Length > 0 then
               let graphModel = getCurrentGraphModel()
               let clickedNodeId = ps.nodes[0]
-              graphModel.Nodes
-              |> NodeModel.get clickedNodeId
+              graphModel
+              |> GraphModel.getNode clickedNodeId
               |> Option.iter (fun clickedNodeModel ->
                   match clickedNodeModel.Metadata with
                   | U2.Case2 txMetadata -> addTxsAndTxosToGraph txMetadata.tx

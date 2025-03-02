@@ -34,30 +34,6 @@ type NodeModel = {
     Metadata: U2<OutputMetadata, TxMetadata>
 }
 
-module NodeModel =
-    let get (id: NodeId) (repo: NodeModel list) =
-        repo |> List.tryFind (fun m -> id = m.Id)
-        
-    let getTransactionNodes (repo: NodeModel list) =
-        repo |> List.filter (_.Metadata.IsCase2)
-   
-    let getTransactions (repo: NodeModel list) =
-        repo
-        |> getTransactionNodes
-        |> List.map (_.Metadata)
-        |> List.map (function
-            | (U2.Case2 m) -> m.tx 
-            | _ -> failwith "Not possible.")
-        
-    let getSpenderNode (txid: string) (index: int) (repo: NodeModel list) =
-        repo
-        |> getTransactions
-        |> List.collect (fun tx -> tx.vin |> Array.map(fun inp -> (inp, tx.txid)) |> List.ofArray)
-        |> List.filter (fun (inp, _) -> inp.txid = txid && inp.vout = index)
-        |> List.map snd
-        |> List.tryExactlyOne
-        |> Option.bind (fun txid -> get txid repo)
-        
 type EdgeModel = {
     Id: EdgeId
     From: NodeId
@@ -69,11 +45,37 @@ type EdgeModel = {
     Output: Output
 }
 
-module EdgeModel =
-    let get (id: EdgeId) (repo: EdgeModel list) =
-        repo |> List.tryFind (fun e -> id = e.Id)
-        
 type GraphModel = {
     Nodes: NodeModel list
     Edges: EdgeModel list
 }
+
+module GraphModel =
+    let getNode (id: NodeId) (g: GraphModel) =
+        g.Nodes |> List.tryFind (fun m -> id = m.Id)
+        
+    let getEdge (id: EdgeId) (g: GraphModel) =
+        g.Edges |> List.tryFind (fun e -> id = e.Id)
+        
+    let getTransactionNodes (g: GraphModel) =
+        g.Nodes |> List.filter (_.Metadata.IsCase2)
+   
+    let getTransactions (g: GraphModel) =
+        g
+        |> getTransactionNodes
+        |> List.map (_.Metadata)
+        |> List.map (function
+            | (U2.Case2 m) -> m.tx 
+            | _ -> failwith "Not possible.")
+        
+    let getSpenderNode (txid: string) (index: int) (g: GraphModel) =
+        g
+        |> getTransactions
+        |> List.collect (fun tx -> tx.vin |> Array.map(fun inp -> (inp, tx.txid)) |> List.ofArray)
+        |> List.filter (fun (inp, _) -> inp.txid = txid && inp.vout = index)
+        |> List.map snd
+        |> List.tryExactlyOne
+        |> Option.bind (fun txid -> getNode txid g)
+        
+    let getEdgesConnectedTo (id: NodeId) (g: GraphModel) =
+        g.Edges |> List.filter (fun e -> e.To = id || e.From = id)
