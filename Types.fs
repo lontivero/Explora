@@ -11,7 +11,7 @@ type OutputMetadata = {
 }
 
 type TxMetadata = {
-    tx: Transaction
+    tx: ConfirmedTransaction
 }
     
 type [<AllowNullLiteral>] GraphNode =
@@ -42,7 +42,7 @@ type EdgeModel = {
     Title: HTMLElement
     Selected: bool
     Marked: bool
-    Output: Output
+    OutputData: OutputMetadata
 }
 
 type GraphModel = {
@@ -79,3 +79,10 @@ module GraphModel =
         
     let getEdgesConnectedTo (id: NodeId) (g: GraphModel) =
         g.Edges |> List.filter (fun e -> e.To = id || e.From = id)
+        
+    let getAddressReused (g: GraphModel) =
+        g.Edges
+        |> List.choose (_.OutputData.output.scriptPubKey.address)
+        |> List.groupBy (id)
+        |> List.filter (fun (_, es) -> List.length es > 1) 
+        |> List.map fst

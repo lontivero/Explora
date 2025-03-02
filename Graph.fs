@@ -6,7 +6,6 @@ open Browser.Types
 open Explora.Types
 open Fable.Core
 open Microsoft.FSharp.Core
-open Thoth.Json
 open Vis
 open Fable.Core.JsInterop
 
@@ -32,7 +31,6 @@ type Graph = {
     data: Data
 }
 
-//[<Import("*", "vis")>]
 [<Global>]
 let vis : IExports = jsNative
 
@@ -46,9 +44,10 @@ let createTitle (item : U2<TxMetadata, OutputMetadata>) =
             "Hash", meta.tx.txid
             "Version", string meta.tx.version
             "Value", meta.tx.vin |> Seq.sumBy (_.prevOut.value) |> formatAmount
-            "Fee", formatAmount meta.tx.fee
             "Vsize", string meta.tx.vsize
             "Locktime", string meta.tx.locktime
+            "Fee", formatAmount meta.tx.fee
+            "Confirmations", string meta.tx.confirmations
             "BlockHash", meta.tx.blockhash
             "BlockTime", meta.tx.blocktime.ToString()
             "Inputs", string meta.tx.vin.Length
@@ -64,7 +63,7 @@ let createTitle (item : U2<TxMetadata, OutputMetadata>) =
     div.innerHTML <- $"<table><tbody>{rows}</tbody></table>"
     div
    
-let createTxNode (tx: Transaction) =
+let createTxNode (tx: ConfirmedTransaction) =
     {
         Id = tx.txid
         Title = createTitle !^{ tx = tx }
@@ -93,7 +92,7 @@ let createEdge (id: string) (from: NodeId) (_to: NodeId) (txo: OutputMetadata)=
        Title = createTitle !^txo
        Marked = false
        Selected = false
-       Output = txo.output
+       OutputData = txo
     }
     
 let deselectAll graphModel =
@@ -122,7 +121,7 @@ let selectEdge (edge: EdgeModel) graphModel =
         Edges = edgeToUpdate :: untouched
     }
     
-let addTransactionToGraph (tx: Transaction) (graph: GraphModel) =
+let addTransactionToGraph (tx: ConfirmedTransaction) (graph: GraphModel) =
     let node = createTxNode tx
     
     let edgesFromPreviousNodes =
@@ -151,15 +150,14 @@ let addTransactionToGraph (tx: Transaction) (graph: GraphModel) =
                 createEdge id from _to {output = output; txid = tx.txid; index = i}))
         |> List.choose id
        
-    let newGraph  =
-        { graph with
-            Nodes = node :: graph.Nodes
-            Edges = List.concat [graph.Edges; edgesFromPreviousNodes; edgesToNextNodes]
-        }
+    { graph with
+        Nodes = node :: graph.Nodes 
+        Edges = List.concat [graph.Edges; edgesFromPreviousNodes; edgesToNextNodes]
+    }
     
-    selectNode node newGraph
+    //selectNode node newGraph
    
-let addTxosToGraph (tx: Transaction) (graph: GraphModel) =
+let addTxosToGraph (tx: ConfirmedTransaction) (graph: GraphModel) =
     let createdTxo = tx.vout |> Array.mapi (fun i x -> { txid = tx.txid; index = i; output = x })
     let txos =
         createdTxo
@@ -192,14 +190,21 @@ let createGraph (container : HTMLElement) =
             data.nodes <- nodes
             data.edges <- edges
     ) 
+    let font = jsOptions<Font>(fun f ->
+        f.face <- Some "Roboto"
+        f.size <- Some (float 8)
+        f.align <- Some "bottom"
+        f.color <- Some "#aaaaaa"
+        f.strokeWidth <- Some (float 0))
+   
+    let edgeLabelScaling = jsOptions<OptionsScaling>(fun s ->
+            s.label <- Some !^(jsOptions<OptionsScalingLabel>( fun l ->  l.enabled <-  Some false)))
     
     let nodeOptions = jsOptions<NodeOptions>(fun n -> n.shape <- Some "dot")
     let edgeOptions = jsOptions<EdgeOptions>(fun e ->
-        e.arrows <- Some !^{|
-          from = None
-          ``to`` = None
-          middle = Some (!^(jsOptions<ArrowHead>(fun a -> a.scaleFactor <- Some 0.1; a.enabled <- Some true)))
-           |}
+        e.arrows <- Some !^"middle"
+        e.font <- Some !^font
+        e.scaling <- Some edgeLabelScaling
         e.smooth <- Some !^true)
     
     let options = jsOptions<Options>(
@@ -261,13 +266,13 @@ let updateNode (graph: Graph) (nodeModel: NodeModel) =
     node.color <- color 
     node
     
-let updateEdge (graph: Graph) (anySelected: bool) (edgeModel: EdgeModel) =
+let updateEdge (graph: Graph) (anySelected: bool) (reusedAddresses: string list) (edgeModel: EdgeModel) =
     let edge =
         graph.data.edges.get(U2.Case1 edgeModel.Id)
         |> Option.defaultWith (fun ()-> jsOptions<Edge>(fun o -> o.id <- Some !^edgeModel.Id ))
     
     let mutable dashes =
-       match edgeModel.Output.scriptPubKey.scriptType with
+       match edgeModel.OutputData.output.scriptPubKey.scriptType with
        | "multisig" ->  U2.Case2 (ResizeArray([15.0; 15.0; 5.0]))
        | "scripthash" ->   U2.Case2 (ResizeArray([40.0; 5.0; 5; 5]))
        | "witness_v0_scripthash" ->   U2.Case2 (ResizeArray([30.0; 15.0; 5.0; 15.0]))
@@ -275,7 +280,7 @@ let updateEdge (graph: Graph) (anySelected: bool) (edgeModel: EdgeModel) =
        | _ -> U2.Case1 false
 
     let color =
-       match (edgeModel.Selected || not anySelected), edgeModel.Output.scriptPubKey.scriptType with
+       match (edgeModel.Selected || not anySelected), edgeModel.OutputData.output.scriptPubKey.scriptType with
        | true, "pubkeyhash" -> pkhColor
        | true, "witness_v0_keyhash" -> wkhColor
        | true, "witness_v1_taproot" -> trColor
@@ -287,13 +292,22 @@ let updateEdge (graph: Graph) (anySelected: bool) (edgeModel: EdgeModel) =
        | true, _ -> unknown
        | false, _ -> "#333333"
     
+    let label =
+       edgeModel.OutputData.output.scriptPubKey.address
+       |> Option.bind (fun addr ->
+            match List.contains addr reusedAddresses with
+            | true -> Some "reused"
+            | false -> if edgeModel.Selected then Some (string edgeModel.OutputData.index) else None )
+      
     edge.from <- Some !^edgeModel.From
     edge.``to`` <- Some !^edgeModel.To
     edge.title <- Some !^edgeModel.Title
-    edge.value <- Some edgeModel.Output.value
+    edge.value <- Some edgeModel.OutputData.output.value
     edge.arrows <- Some !^"to"
     edge.dashes <- Some dashes
     edge.color <- Some !^color
+    edge.arrows <- Some !^"middle"
+    edge.label <- label
     edge
 
 let getUnexistentNodes graph graphModel =
@@ -310,7 +324,8 @@ let update graph graphModel =
     let updatedNodes = ResizeArray ( graphModel.Nodes |> List.map(updateNode graph)  )
     let nodesToRemove = ResizeArray (getUnexistentNodes graph graphModel)
     let isAnySelected = graphModel.Nodes |> List.exists (_.Selected)
-    let updatedEdges = ResizeArray ( graphModel.Edges |> List.map(updateEdge graph isAnySelected)  )
+    let reusedAddrs = GraphModel.getAddressReused graphModel
+    let updatedEdges = ResizeArray ( graphModel.Edges |> List.map(updateEdge graph isAnySelected reusedAddrs)  )
     let edgesToRemove = ResizeArray (getUnexistentEdges graph graphModel)
     graph.data.nodes.remove (!^nodesToRemove) |> ignore
     graph.data.edges.remove (!^edgesToRemove) |> ignore

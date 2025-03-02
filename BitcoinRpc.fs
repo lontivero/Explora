@@ -5,7 +5,6 @@ open Microsoft.FSharp.Core
 open Thoth.Fetch
 open Thoth.Json
 
-
 type ScriptPubKey = {
     asm : string
     address: string option
@@ -23,23 +22,36 @@ type Input = {
     prevOut: Output
 }
 
-type Transaction = {
+type ConfirmedTransaction = {
     txid: string
     version: int
-    blockhash: string
-    confirmations: int
-    time: DateTimeOffset
-    blocktime: DateTimeOffset
-    fee: float
     size: int
     vsize: int
     weight: int
     locktime: int 
     vin: Input[]
     vout: Output[]
+    fee: float
+    blockhash: string
+    confirmations: int
+    time: DateTimeOffset
+    blocktime: DateTimeOffset
 }
 
+type UnconfirmedTransaction = {
+    txid: string
+    version: int
+    size: int
+    vsize: int
+    weight: int
+    locktime: int 
+    vout: Output[]
+}
 
+type Transaction =
+    | ConfirmedTransaction of ConfirmedTransaction
+    | UnconfirmedTransaction of UnconfirmedTransaction
+    
 let unixDateTimeDecoder : Decoder<DateTimeOffset> =
     Decode.int64 |> Decode.map (DateTimeOffset.FromUnixTimeSeconds)
     
@@ -63,23 +75,40 @@ let InputDecoder =
         prevOut = get.Required.Field "prevout" OutputDecoder
     })
     
-let TransactionDecoder =
+let ConfirmedTransactionDecoder : Decoder<ConfirmedTransaction> =
    Decode.object (fun get -> {
         txid = get.Required.Field "txid" Decode.string
         version = get.Required.Field "version" Decode.int
-        blockhash = get.Required.Field "blockhash" Decode.string
-        confirmations = get.Required.Field "confirmations" Decode.int
-        time = get.Required.Field "time" unixDateTimeDecoder
-        blocktime = get.Required.Field "blocktime" unixDateTimeDecoder
-        fee = get.Required.Field "fee" Decode.float
         size = get.Required.Field "size" Decode.int
         vsize = get.Required.Field "vsize" Decode.int
         weight = get.Required.Field "weight" Decode.int
         locktime = get.Required.Field "locktime" Decode.int
         vin = get.Required.Field "vin" (Decode.array InputDecoder)
         vout = get.Required.Field "vout" (Decode.array OutputDecoder)
-   }) 
+        blockhash = get.Required.Field "blockhash" Decode.string
+        fee = get.Required.Field "fee" Decode.float
+        time = get.Required.Field "time" unixDateTimeDecoder
+        confirmations = get.Required.Field "confirmations" Decode.int
+        blocktime = get.Required.Field "blocktime" unixDateTimeDecoder
+   })
+   
+let UnconfirmedTransactionDecoder : Decoder<UnconfirmedTransaction> =
+   Decode.object (fun get -> {
+        txid = get.Required.Field "txid" Decode.string
+        version = get.Required.Field "version" Decode.int
+        size = get.Required.Field "size" Decode.int
+        vsize = get.Required.Field "vsize" Decode.int
+        weight = get.Required.Field "weight" Decode.int
+        locktime = get.Required.Field "locktime" Decode.int
+        vout = get.Required.Field "vout" (Decode.array OutputDecoder)
+   })
 
+let TransactionDecoder : Decoder<Transaction> =
+   Decode.optional "confirmations" Decode.int
+   |> Decode.andThen(function
+       | Some _ -> ConfirmedTransactionDecoder |> Decode.map ConfirmedTransaction
+       | None -> UnconfirmedTransactionDecoder |> Decode.map UnconfirmedTransaction)
+   
 type RpcResponse<'T> = {
     result: 'T
     error: string option

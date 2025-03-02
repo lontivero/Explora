@@ -16,11 +16,16 @@ open Graph
 
 let requestTransaction (txId: string) (graphModel: GraphModel) =
     promise {
-        let! txResult = getTransaction txId
-        return
-            txResult
-            |> Result.map(fun tx ->
-                addTransactionToGraph tx graphModel)
+        let txNode = GraphModel.getNode txId graphModel
+        if txNode.IsSome then
+            return (Ok graphModel)
+        else
+            let! txResult = getTransaction txId
+            return
+                txResult
+                |> Result.bind(function
+                    | ConfirmedTransaction tx ->Ok(addTransactionToGraph tx graphModel)
+                    | UnconfirmedTransaction _ -> Error "The requested transaction is still unconfirmed")
     } 
     
 let requestSpenderTransaction (txId: string) (index: int) (graphModel: GraphModel) =
@@ -68,7 +73,7 @@ let createTableSection (title: string) (rows: string) =
     </tbody>
     """
     
-let createTableForTransaction (tx: Transaction) =
+let createTableForTransaction (tx: ConfirmedTransaction) =
     let inputsHtml =
         tx.vin
         |> Seq.map (fun inp -> createAddressTableRow inp.prevOut.scriptPubKey.address inp.prevOut.value inp.txid)
@@ -85,11 +90,11 @@ let createTableForTransaction (tx: Transaction) =
             "Version", string tx.version
             "Volume", tx.vin |> Seq.sumBy (_.prevOut.value) |> formatAmount
             "Fee", formatAmount tx.fee
+            "BlockHash",  $"<a href=https://mempool.space/block/{tx.blockhash}>{tx.blockhash}</a>"
+            "BlockTime", string tx.blocktime
             "Vsize", string tx.vsize
             "Locktime", string tx.locktime
-            "BlockHash",  $"<a href=https://mempool.space/block/{tx.blockhash}>{tx.blockhash}</a>"
-            "BlockTime", tx.blocktime.ToString()
-        ]
+        ] 
         |> Seq.map (fun (d, v) -> createDetailTableRow d v)
         |> String.concat ""
         
@@ -118,7 +123,6 @@ let init() =
     let getCurrentGraphModel () =
         graphModelHistory.Peek ()
         
-        
     let updateGraphModel (newGraphModelResult : Result<GraphModel,string>) =
         match newGraphModelResult with
         | Ok newGraphModel ->
@@ -126,7 +130,7 @@ let init() =
             update graph newGraphModel
         | Error msg -> window.alert msg
         
-    let addTxsAndTxosToGraph (tx: Transaction) =
+    let addTxsAndTxosToGraph (tx: ConfirmedTransaction) =
         promise {
             let mutable graphModel = getCurrentGraphModel()
             for inp in tx.vin do
