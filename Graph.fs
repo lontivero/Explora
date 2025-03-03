@@ -25,6 +25,10 @@ let shColor = "#fefe5e"
 let multiColor = "#5d87fd"
 [<Literal>]
 let unknown = "#ff0000"
+[<Literal>]
+let markedColor = "#ff5722"
+[<Literal>]
+let ignoredColor ="#333333"
 
 type Graph = {
     network: Network
@@ -69,18 +73,20 @@ let createTxNode (tx: ConfirmedTransaction) =
         Title = createTitle !^{ tx = tx }
         Metadata = !^{ tx = tx}
         Selected = false
+        Highlighted = false
         Marked = false
         Kind = NodeModelKind.Tx
     }
     
 let createTxoNode (txo: OutputMetadata) =
     {
-       Id = $"{txo.txid}-{txo.index}"
-       Title = createTitle !^txo
-       Selected = false
-       Marked = false
-       Metadata = !^txo
-       Kind = NodeModelKind.Txo
+        Id = $"{txo.txid}-{txo.index}"
+        Title = createTitle !^txo
+        Selected = false
+        Highlighted = false
+        Marked = false
+        Metadata = !^txo
+        Kind = NodeModelKind.Txo
     }
    
 let createEdge (id: string) (from: NodeId) (_to: NodeId) (txo: OutputMetadata)=
@@ -90,6 +96,7 @@ let createEdge (id: string) (from: NodeId) (_to: NodeId) (txo: OutputMetadata)=
        To = _to
        Value = txo.output.value
        Title = createTitle !^txo
+       Highlighted = false
        Marked = false
        Selected = false
        OutputData = txo
@@ -97,15 +104,15 @@ let createEdge (id: string) (from: NodeId) (_to: NodeId) (txo: OutputMetadata)=
     
 let deselectAll graphModel =
     { graphModel with
-        Nodes = graphModel.Nodes |> List.map (fun n -> {n with Selected = false})
-        Edges = graphModel.Edges |> List.map (fun n -> {n with Selected = false})
+        Nodes = graphModel.Nodes |> List.map (fun n -> {n with Selected = false; Highlighted = false})
+        Edges = graphModel.Edges |> List.map (fun n -> {n with Selected = false; Highlighted = false})
     }
     
 let selectNode (node: NodeModel) graphModel =
     let graphModel = deselectAll graphModel  
-    let nodeToUpdate = {node with Selected = true}
+    let nodeToUpdate = {node with Selected = true; Highlighted = true}
     let untouchedNodes  = graphModel.Nodes |> List.filter (fun n -> n.Id <> nodeToUpdate.Id)
-    let edgesToUpdate = graphModel |> GraphModel.getEdgesConnectedTo nodeToUpdate.Id |> List.map (fun edge -> {edge with Selected = true })
+    let edgesToUpdate = graphModel |> GraphModel.getEdgesConnectedTo nodeToUpdate.Id |> List.map (fun edge -> {edge with Highlighted = true })
     let untouchedEdges = graphModel.Edges |> List.filter (fun e -> List.exists (fun e2 -> e2.Id = e.Id) edgesToUpdate |> not)
     { graphModel with
         Nodes = nodeToUpdate :: untouchedNodes
@@ -115,7 +122,7 @@ let selectNode (node: NodeModel) graphModel =
 // unused
 let selectEdge (edge: EdgeModel) graphModel =
     let graphModel = deselectAll graphModel  
-    let edgeToUpdate = {edge with Selected = true}
+    let edgeToUpdate = {edge with Selected = true; Highlighted = true}
     let untouched  = graphModel.Edges |> List.filter (fun n -> n.Id <> edgeToUpdate.Id)
     { graphModel with
         Edges = edgeToUpdate :: untouched
@@ -209,7 +216,10 @@ let createGraph (container : HTMLElement) =
     
     let options = jsOptions<Options>(
         fun opts ->
-            opts.interaction <- Some {| hover = true |}
+            opts.interaction <- Some {|
+                                        hover = true
+                                        selectConnectedEdges = false
+                                        |}
             opts.nodes <- Some nodeOptions
             opts.edges <- Some edgeOptions
             opts.physics <- Some {|
@@ -250,8 +260,8 @@ let updateNode (graph: Graph) (nodeModel: NodeModel) =
         | U2.Case2 meta -> getShapeByLocktime meta.tx.locktime
 
     let color =
-        match nodeModel.Marked, nodeModel.Selected with
-        | true, _ -> Some !^"#ff5722"
+        match nodeModel.Marked, nodeModel.Highlighted with
+        | true, _ -> Some !^markedColor
         | _, true -> Some !^"#10cfb5"
         | _, false -> Some !^"#1984fc"
         
@@ -280,24 +290,25 @@ let updateEdge (graph: Graph) (anySelected: bool) (reusedAddresses: string list)
        | _ -> U2.Case1 false
 
     let color =
-       match (edgeModel.Selected || not anySelected), edgeModel.OutputData.output.scriptPubKey.scriptType with
-       | true, "pubkeyhash" -> pkhColor
-       | true, "witness_v0_keyhash" -> wkhColor
-       | true, "witness_v1_taproot" -> trColor
-       | true, "nulldata" -> nullDataColor
-       | true, "witness_unknown" -> unknownWitnessColor
-       | true, "witness_v0_scripthash"
-       | true, "scripthash" -> shColor 
-       | true, "multisig" -> multiColor
-       | true, _ -> unknown
-       | false, _ -> "#333333"
+       match edgeModel.Marked, (edgeModel.Highlighted || not anySelected), edgeModel.OutputData.output.scriptPubKey.scriptType with
+       | true, _, _ -> markedColor
+       | _, true, "pubkeyhash" -> pkhColor
+       | _, true, "witness_v0_keyhash" -> wkhColor
+       | _, true, "witness_v1_taproot" -> trColor
+       | _, true, "nulldata" -> nullDataColor
+       | _, true, "witness_unknown" -> unknownWitnessColor
+       | _, true, "witness_v0_scripthash"
+       | _, true, "scripthash" -> shColor 
+       | _, true, "multisig" -> multiColor
+       | _, true, _ -> unknown
+       | _, false, _ -> ignoredColor
     
     let label =
        edgeModel.OutputData.output.scriptPubKey.address
        |> Option.bind (fun addr ->
             match List.contains addr reusedAddresses with
             | true -> Some "reused"
-            | false -> if edgeModel.Selected then Some (string edgeModel.OutputData.index) else None )
+            | false -> if edgeModel.Highlighted then Some (string edgeModel.OutputData.index) else None )
       
     edge.from <- Some !^edgeModel.From
     edge.``to`` <- Some !^edgeModel.To

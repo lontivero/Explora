@@ -29,6 +29,7 @@ type NodeModel = {
     Id: NodeId
     Title: HTMLElement
     Selected: bool
+    Highlighted: bool
     Marked: bool
     Kind: NodeModelKind
     Metadata: U2<OutputMetadata, TxMetadata>
@@ -41,6 +42,7 @@ type EdgeModel = {
     Value: float
     Title: HTMLElement
     Selected: bool
+    Highlighted: bool
     Marked: bool
     OutputData: OutputMetadata
 }

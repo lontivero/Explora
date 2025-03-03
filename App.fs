@@ -195,6 +195,14 @@ let init() =
         graph.network?physics?options?enabled <- true
         graph.network.startSimulation()
         )
+    graph.network.on(NetworkEvents.SelectEdge, fun ps ->
+        let txoid = ps?edges |> Array.head
+        if ps?nodes |> Array.length = 0 then
+            getCurrentGraphModel()
+            |> GraphModel.getEdge txoid
+            |> Option.iter(fun edge ->
+                updateGraphModel (Ok (selectEdge edge (getCurrentGraphModel())))) 
+        )
     graph.network.on(NetworkEvents.SelectNode, fun ps ->
         let txid = ps?nodes |> Array.head
         getCurrentGraphModel()
